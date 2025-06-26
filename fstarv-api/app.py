@@ -1,5 +1,5 @@
 # =============================
-# FstarVfootball – Streamlit Version (app.py) with FBref scraping
+# FstarVfootball – Streamlit Version (app.py) with FBref scraping + Google age/height
 # =============================
 
 import streamlit as st
@@ -21,7 +21,6 @@ def _build_league_map():
         tiers = {}
         for rank, lg in enumerate(league_avg.index, start=1):
             tiers[lg] = 0 if rank<=5 else 1 if rank<=10 else 2 if rank<=20 else 3 if rank<=30 else 4
-        # minimal fallback
         tiers.setdefault("Premier League",0)
         tiers.setdefault("La Liga",0)
         return tiers
@@ -39,6 +38,7 @@ TEAM_TO_LEAGUE = {
     "Real Madrid": "La Liga",
     "Bayern Munich": "Bundesliga",
     "Juventus": "Serie A",
+    "Manchester United": "Premier League",
     # Add more mappings as needed
 }
 
@@ -52,6 +52,14 @@ def league_factor(lg:str)->float: return TIER_FACTOR.get(LEAGUE_TIER_MAP.get(lg,
 def age_factor(bd:date)->float:
     age=(date.today()-bd).days//365
     return 1+0.02*(18-age) if age<18 else max(0.3,1-0.03*(age-18))
+
+def google_scrape(query: str) -> str:
+    try:
+        html = requests.get(f"https://www.google.com/search?q={query}", headers=HEADERS, timeout=10).text
+        match = re.search(r'<div class="BNeawe iBp4i AP7Wnd">(\d+\.?\d*)', html)
+        return match.group(1) if match else "N/A"
+    except:
+        return "N/A"
 
 ###############################
 # 3. FBref scraping          #
@@ -84,22 +92,24 @@ def _parse_fbref(url:str)->dict:
     mins=g_plus_a=0
     if stat_table:
         rows=stat_table.find("tbody").find_all("tr",class_=lambda x:x!="thead")
-        if rows:
-            latest=rows[-1]
-            mins_str = latest.find("td",{"data-stat":"minutes"}).text.strip().replace(",","")
-            goals_str = latest.find("td",{"data-stat":"goals"}).text.strip().replace(",","")
-            ast_str = latest.find("td",{"data-stat":"assists"}).text.strip().replace(",","")
-            mins = int(mins_str or 0)
-            goals = int(goals_str or 0)
-            ast = int(ast_str or 0)
-            g_plus_a = goals + ast
+        for row in reversed(rows):
+            comp = row.find("td", {"data-stat": "comp"})
+            if comp and "league" in comp.text.lower():
+                mins_str = row.find("td",{"data-stat":"minutes"}).text.strip().replace(",","")
+                goals_str = row.find("td",{"data-stat":"goals"}).text.strip().replace(",","")
+                ast_str = row.find("td",{"data-stat":"assists"}).text.strip().replace(",","")
+                mins = int(mins_str or 0)
+                goals = int(goals_str or 0)
+                ast = int(ast_str or 0)
+                g_plus_a = goals + ast
+                break
     return{"name":name,"birthdate":birthdate,"league":league,"minutes":mins or 2500,"g_plus_a":g_plus_a or 13,"position":"Unknown"}
 
 def fetch_player(name:str)->dict:
     url=_find_fbref_url(name)
     if not url:
         raise ValueError("Player not found on FBref")
-    time.sleep(1) # polite delay
+    time.sleep(1)
     parsed = _parse_fbref(url)
     if not parsed:
         raise ValueError("Could not parse player page correctly")
@@ -128,11 +138,13 @@ st.markdown("""הזן שם שחקן באנגלית (למשל **Lamine Yamal**) �
 
 name=st.text_input("שם שחקן:")
 if st.button("חשב מדד") and name:
-    with st.spinner("טוען נתונים מ‑FBref…"):
+    with st.spinner("טוען נתונים מ‑FBref ו‑Google…"):
         try:
             prof=fetch_player(name)
+            height = google_scrape(f"{name} height")
+            age = (date.today() - prof["birthdate"]).days // 365
             res=calculate_ysp75(prof)
             st.success(f"{prof['name']} – YSP‑75: {res['score']} ({res['tier']})")
-            st.caption(f"ליגה: {prof['league']} | תאריך לידה: {prof['birthdate']} | דקות:{prof['minutes']} | G+A:{prof['g_plus_a']}")
+            st.caption(f"ליגה: {prof['league']} | גיל: {age} | גובה: {height} מ׳ | דקות:{prof['minutes']} | G+A:{prof['g_plus_a']}")
         except Exception as e:
             st.error(f"שגיאה: {e}")
