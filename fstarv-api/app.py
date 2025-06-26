@@ -1,6 +1,6 @@
 # FstarVfootball – אפליקציית Streamlit למדד YSP‑75
-# כולל 3 שכבות של משיכת מידע: FBref > Understat > Wikipedia
-# כולל דירוג ליגה, גיל, גובה, דקות, G+A (שערים + בישולים)
+# כולל 3 שכבות מידע: FBref > Understat > Wikipedia
+# ותיקון שגיאה כאשר תאריך הלידה לא קיים
 
 import streamlit as st
 from datetime import date
@@ -10,7 +10,6 @@ import pandas as pd
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# קריאת דירוג ליגות מ-FiveThirtyEight
 @st.cache_data(ttl=86400)
 def build_league_map():
     try:
@@ -47,6 +46,8 @@ def league_factor(lg: str) -> float:
     return TIER_FACTOR.get(LEAGUE_TIER.get(lg, 4), 0.6)
 
 def age_factor(bd: date) -> float:
+    if not bd:
+        return 0.6
     age = (date.today() - bd).days // 365
     return 1 + 0.02 * (18 - age) if age < 18 else max(0.3, 1 - 0.03 * (age - 18))
 
@@ -79,9 +80,7 @@ def fbref_parse(url: str):
     soup = BeautifulSoup(html, 'html.parser')
     name = soup.find('h1').text.strip() if soup.find('h1') else 'Unknown'
     birth_match = re.search(r'data-birth="(\d{4}-\d{2}-\d{2})"', html)
-    if not birth_match:
-        return None
-    birth = date.fromisoformat(birth_match.group(1))
+    birth = date.fromisoformat(birth_match.group(1)) if birth_match else None
     club_tag = soup.find('span', class_='fancy')
     team = club_tag.text.strip() if club_tag else ''
     league = club_tag.get('title', '').split(' ')[-1] if club_tag and 'title' in club_tag.attrs else TEAM_TO_LEAGUE.get(team, 'Unknown')
@@ -119,7 +118,8 @@ def understat_fetch(name: str):
         mins = sum(int(m['time']) for m in matches if m['season'] == current['season'])
         goals = sum(int(m['goals']) for m in matches if m['season'] == current['season'])
         assists = sum(int(m['assists']) for m in matches if m['season'] == current['season'])
-        return {'name': name, 'birthdate': date.fromisoformat(player['birth_date']),
+        birth = date.fromisoformat(player['birth_date']) if player.get('birth_date') else None
+        return {'name': name, 'birthdate': birth,
                 'league': league, 'minutes': mins, 'g_plus_a': goals + assists}
     except:
         return None
@@ -136,7 +136,6 @@ def wikipedia_basic(player: str):
     except:
         return None
 
-# 🧠 מדד YSP‑75
 def compute_score(p: dict) -> float:
     if not p: return 0
     score = league_factor(p['league']) * 30
@@ -145,7 +144,6 @@ def compute_score(p: dict) -> float:
     score += min(1, p['g_plus_a'] / 20) * 25
     return round(score, 1)
 
-# 💾 פונקציה מאוחדת לשליפת שחקן
 def fetch_player(player: str):
     url = fbref_search_url(player)
     if url:
@@ -160,9 +158,8 @@ def fetch_player(player: str):
         return data
     raise ValueError("Unable to fetch player data from available sources")
 
-# 🎛️ Streamlit UI
+# Streamlit UI
 st.title("FstarVfootball – חיזוי הצלחת שחקנים צעירים")
-
 name = st.text_input("🔍 הזן שם שחקן (באנגלית):", "Lamine Yamal")
 
 if name:
@@ -171,8 +168,12 @@ if name:
         score = compute_score(player)
         height = google_height(name)
         tier = ("🔴 טופ עולמי" if score >= 75 else "🟠 פוטנציאל גבוה" if score >= 70 else "🟡 פרוספקט מבטיח" if score >= 60 else "⚪ מקצוען עם תקרה מוגבלת")
+        if player['birthdate']:
+            age = (date.today() - player['birthdate']).days // 365
+        else:
+            age = "לא ידוע"
         st.subheader(f"{player['name']} – YSP‑75: {score} ({tier})")
-        st.markdown(f"**ליגה:** {player['league']} | **גיל:** {(date.today()-player['birthdate']).days//365} | **גובה:** {height} מ׳")
+        st.markdown(f"**ליגה:** {player['league']} | **גיל:** {age} | **גובה:** {height} מ׳")
         st.markdown(f"**דקות משחק:** {player['minutes']} | **שערים + בישולים:** {player['g_plus_a']}")
     except Exception as e:
         st.error(f"שגיאה: {str(e)}")
