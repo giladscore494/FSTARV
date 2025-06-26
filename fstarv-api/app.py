@@ -1,5 +1,5 @@
 # =============================
-# FstarVfootball – Streamlit Version (app.py) with fallback search
+# FstarVfootball – Streamlit Version (app.py) with triple fallback search
 # =============================
 
 import streamlit as st
@@ -41,18 +41,29 @@ def age_factor(birthdate: date) -> float:
 def _search_transfermarkt(player_name: str) -> str | None:
     try:
         q = f"site:transfermarkt.com {player_name} profile"
-        url = f"https://duckduckgo.com/html/?q={q}"
         headers = {"User-Agent": "Mozilla/5.0 (compatible; FstarVfootball/1.0)"}
-        html = requests.get(url, headers=headers, timeout=20).text
-        m = re.search(r'https://www\.transfermarkt\.com/[^"/]+/profil/spieler/\d+', html)
-        if m:
-            return m.group(0)
-        # Fallback to Google (scraping their HTML safely)
+
+        # DuckDuckGo search
+        ddg_url = f"https://duckduckgo.com/html/?q={q}"
+        ddg_html = requests.get(ddg_url, headers=headers, timeout=20).text
+        ddg_match = re.search(r'https://www\.transfermarkt\.com/[^"/]+/profil/spieler/\d+', ddg_html)
+        if ddg_match:
+            return ddg_match.group(0)
+
+        # Google fallback
         g_url = f"https://www.google.com/search?q=site:transfermarkt.com+{player_name.replace(' ', '+')}+profile"
         g_html = requests.get(g_url, headers=headers, timeout=20).text
-        g_match = re.search(r"https://www\.transfermarkt\.com/[^"/]+/profil/spieler/\d+", g_html)
+        g_match = re.search(r'https://www\.transfermarkt\.com/[^"/]+/profil/spieler/\d+', g_html)
         if g_match:
             return g_match.group(0)
+
+        # Bing fallback
+        b_url = f"https://www.bing.com/search?q=site:transfermarkt.com+{player_name.replace(' ', '+')}+profile"
+        b_html = requests.get(b_url, headers=headers, timeout=20).text
+        b_match = re.search(r'https://www\.transfermarkt\.com/[^"/]+/profil/spieler/\d+', b_html)
+        if b_match:
+            return b_match.group(0)
+
     except Exception:
         return None
     return None
@@ -145,3 +156,4 @@ if st.button("חשב מדד"):
         st.caption(f"ליגה: {profile['league']}, תאריך לידה: {profile['birthdate']}")
     except Exception as e:
         st.error(f"שגיאה: {str(e)}")
+
