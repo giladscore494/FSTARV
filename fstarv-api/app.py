@@ -31,6 +31,17 @@ def _build_league_map():
 LEAGUE_TIER_MAP = _build_league_map()
 TIER_FACTOR       = {0:1.0,1:0.9,2:0.8,3:0.7,4:0.6}
 
+TEAM_TO_LEAGUE = {
+    "Inter Miami": "Major League Soccer",
+    "Barcelona": "La Liga",
+    "Paris Saint-Germain": "Ligue 1",
+    "Manchester City": "Premier League",
+    "Real Madrid": "La Liga",
+    "Bayern Munich": "Bundesliga",
+    "Juventus": "Serie A",
+    # Add more mappings as needed
+}
+
 ###############################
 # 2. Helpers                 #
 ###############################
@@ -57,13 +68,18 @@ def _find_fbref_url(name:str)->str|None:
 def _parse_fbref(url:str)->dict:
     html=requests.get(url,headers=HEADERS,timeout=20).text
     soup=BeautifulSoup(html,"html.parser")
-    name=soup.find("h1").text.strip()
-    birth_tag=soup.find("span",id="necro-birth")
-    birthdate=date.fromisoformat(birth_tag["data-birth"])
-    club_tag=soup.find("span",class_="fancy")
+    name_tag = soup.find("h1")
+    birth_tag = soup.find("span",id="necro-birth")
+    if not name_tag or not birth_tag:
+        return None
+    name = name_tag.text.strip()
+    birthdate = date.fromisoformat(birth_tag["data-birth"])
+    club_tag = soup.find("span",class_="fancy")
     league="Unknown"
-    if club_tag and "title" in club_tag.attrs:
-        league=club_tag["title"].split(" ")[-1]
+    team_name = ""
+    if club_tag:
+        team_name = club_tag.text.strip()
+        league = club_tag.get("title","").split(" ")[-1] if "title" in club_tag.attrs else TEAM_TO_LEAGUE.get(team_name,"Unknown")
     stat_table=soup.find("table",id="stats_standard_dom_lg")
     mins=g_plus_a=0
     if stat_table:
@@ -84,7 +100,10 @@ def fetch_player(name:str)->dict:
     if not url:
         raise ValueError("Player not found on FBref")
     time.sleep(1) # polite delay
-    return _parse_fbref(url)
+    parsed = _parse_fbref(url)
+    if not parsed:
+        raise ValueError("Could not parse player page correctly")
+    return parsed
 
 ###############################
 # 4. YSP‑75 calculation      #
