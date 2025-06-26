@@ -58,27 +58,25 @@ def _parse_fbref(url:str)->dict:
     html=requests.get(url,headers=HEADERS,timeout=20).text
     soup=BeautifulSoup(html,"html.parser")
     name=soup.find("h1").text.strip()
-    # birth
     birth_tag=soup.find("span",id="necro-birth")
     birthdate=date.fromisoformat(birth_tag["data-birth"])
-    # height
-    ht=soup.find(text=re.compile("cm"))
-    # latest club + league
     club_tag=soup.find("span",class_="fancy")
     league="Unknown"
     if club_tag and "title" in club_tag.attrs:
         league=club_tag["title"].split(" ")[-1]
-    # current season table
-    mins=g_plus_a=0
     stat_table=soup.find("table",id="stats_standard_dom_lg")
+    mins=g_plus_a=0
     if stat_table:
         rows=stat_table.find("tbody").find_all("tr",class_=lambda x:x!="thead")
         if rows:
             latest=rows[-1]
-            mins=int(latest.find("td",{"data-stat":"minutes"}).text or 0)
-            goals=int(latest.find("td",{"data-stat":"goals"}).text or 0)
-            ast=int(latest.find("td",{"data-stat":"assists"}).text or 0)
-            g_plus_a=goals+ast
+            mins_str = latest.find("td",{"data-stat":"minutes"}).text.strip().replace(",","")
+            goals_str = latest.find("td",{"data-stat":"goals"}).text.strip().replace(",","")
+            ast_str = latest.find("td",{"data-stat":"assists"}).text.strip().replace(",","")
+            mins = int(mins_str or 0)
+            goals = int(goals_str or 0)
+            ast = int(ast_str or 0)
+            g_plus_a = goals + ast
     return{"name":name,"birthdate":birthdate,"league":league,"minutes":mins or 2500,"g_plus_a":g_plus_a or 13,"position":"Unknown"}
 
 def fetch_player(name:str)->dict:
