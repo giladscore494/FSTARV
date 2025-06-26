@@ -1,18 +1,15 @@
 # =============================
-# FstarVfootball – Single-file Version (app.py)
-# Deployable with no external files
+# FstarVfootball – Streamlit Version (app.py)
 # =============================
 
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from typing import Dict, Any
+import streamlit as st
 from datetime import date
 import requests
 import re
+from bs4 import BeautifulSoup
 import csv
 import os
 import datetime
-from bs4 import BeautifulSoup
 
 # ──────────────────────────────
 # Static data: league tiers and factors
@@ -53,7 +50,7 @@ def _search_transfermarkt(player_name: str) -> str | None:
     m = re.search(r"https://www\\.transfermarkt\\.com/[^\\"]+/profil/spieler/\\d+", html)
     return m.group(0) if m else None
 
-def _parse_transfermarkt(url: str) -> Dict[str, Any]:
+def _parse_transfermarkt(url: str) -> dict:
     html = requests.get(url, timeout=20).text
     soup = BeautifulSoup(html, "html.parser")
     name = soup.find("h1").get_text(strip=True)
@@ -70,7 +67,7 @@ def _parse_transfermarkt(url: str) -> Dict[str, Any]:
         "position": "Winger",
     }
 
-def fetch_player(player_name: str) -> Dict[str, Any]:
+def fetch_player(player_name: str) -> dict:
     url = _search_transfermarkt(player_name)
     if not url:
         raise ValueError("Player not found on Transfermarkt")
@@ -89,7 +86,7 @@ WEIGHTS = {
     "traits": 0.10,
 }
 
-def calculate_ysp75(profile: Dict[str, Any]) -> Dict[str, Any]:
+def calculate_ysp75(profile: dict) -> dict:
     L = league_factor(profile["league"])
     A = age_factor(profile["birthdate"])
     minutes_score = min(100, profile["minutes"] / 15)
@@ -116,30 +113,27 @@ def calculate_ysp75(profile: Dict[str, Any]) -> Dict[str, Any]:
     return {"score": score, "tier": tier}
 
 # ──────────────────────────────
-# Log predictions to CSV
-SHEET_PATH = os.getenv("FSTARV_CSV", "portfolio.csv")
+# Streamlit App
+st.set_page_config(page_title="FstarVfootball", page_icon="⚽")
+st.title("FstarVfootball – חיזוי הצלחת שחקנים צעירים")
 
-def log_prediction(entry: Dict):
-    entry["timestamp"] = datetime.datetime.utcnow().isoformat()
-    header = list(entry.keys())
-    file_exists = os.path.isfile(SHEET_PATH)
-    with open(SHEET_PATH, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=header)
-        if not file_exists:
-            writer.writeheader()
-        writer.writerow(entry)
+st.markdown("""
+🔍 הזן שם שחקן באנגלית (למשל: **Lamine Yamal**)
 
-# ──────────────────────────────
-# FastAPI app
-app = FastAPI(title="FstarVfootball API")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"])
+✅ הציון מבוסס על גיל, ליגה, דקות משחק, השפעה התקפית ועוד.
 
-@app.get("/api/ysp75")
-async def ysp75(name: str):
+ℹ️ הסבר דירוג:
+- **75+** = שחקן טופ אירופי בפוטנציאל
+- **60–74** = פוטנציאל גבוה / פרוספקט
+- **<60** = מקצוען עם תקרה מוגבלת
+""")
+
+name = st.text_input("שם שחקן:")
+if st.button("חשב מדד"):
     try:
         profile = fetch_player(name)
         result = calculate_ysp75(profile)
-        log_prediction({"name": name, **result})
-        return {"player": profile["name"], **result}
+        st.success(f"{profile['name']} – ציון YSP‑75: {result['score']} ({result['tier']})")
+        st.caption(f"ליגה: {profile['league']}, תאריך לידה: {profile['birthdate']}")
     except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        st.error(f"שגיאה: {str(e)}")
