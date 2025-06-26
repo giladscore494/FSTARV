@@ -12,7 +12,11 @@ SPI_CSV_URL = "https://projects.fivethirtyeight.com/soccer-api/club/spi_global_r
 def load_league_tiers():
     response = requests.get(SPI_CSV_URL, timeout=20)
     content = response.content.decode("utf-8", errors="ignore")
-    df = pd.read_csv(io.StringIO(content))
+    try:
+        df = pd.read_csv(io.StringIO(content), usecols=["league", "spi"])
+    except Exception as e:
+        st.error("⚠️ Failed to load league tier data.")
+        return {}
     league_avg = df.groupby("league")["spi"].mean().sort_values(ascending=False)
     tiers = {}
     for idx, (lg, _) in enumerate(league_avg.items()):
@@ -139,4 +143,3 @@ if st.button("Compute YSP‑75") and player_name:
 #    pip install -r requirements.txt
 #    streamlit run app.py
 # Or deploy to Streamlit Cloud with app.py as entry point.
-
