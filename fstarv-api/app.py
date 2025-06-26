@@ -10,7 +10,9 @@ SPI_CSV_URL = "https://projects.fivethirtyeight.com/soccer-api/club/spi_global_r
 # -------- 1. Build league tier map (FiveThirtyEight) ----------------
 @st.cache_data(ttl=86400)
 def load_league_tiers():
-    df = pd.read_csv(io.BytesIO(requests.get(SPI_CSV_URL, timeout=20).content))
+    response = requests.get(SPI_CSV_URL, timeout=20)
+    content = response.content.decode("utf-8", errors="ignore")
+    df = pd.read_csv(io.StringIO(content))
     league_avg = df.groupby("league")["spi"].mean().sort_values(ascending=False)
     tiers = {}
     for idx, (lg, _) in enumerate(league_avg.items()):
@@ -67,7 +69,7 @@ def wikipedia_height(name: str) -> str | None:
         js = requests.get(
             f"https://en.wikipedia.org/api/rest_v1/page/summary/{name.replace(' ', '_')}",
             timeout=10).json()
-        m = re.search(r"\((\d\.\d{2})\sm\)", js.get("extract", ""))
+        m = re.search(r"\\((\\d\\.\\d{2})\\sm\\)", js.get("extract", ""))
         return m.group(1) if m else None
     except:
         return None
@@ -137,3 +139,4 @@ if st.button("Compute YSP‑75") and player_name:
 #    pip install -r requirements.txt
 #    streamlit run app.py
 # Or deploy to Streamlit Cloud with app.py as entry point.
+
