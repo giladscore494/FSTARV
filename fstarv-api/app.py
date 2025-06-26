@@ -47,7 +47,7 @@ def _search_transfermarkt(player_name: str) -> str | None:
     url = f"https://duckduckgo.com/html/?q={q}"
     headers = {"User-Agent": "Mozilla/5.0 (compatible; FstarVfootball/1.0)"}
     html = requests.get(url, headers=headers, timeout=20).text
-    m = re.search(r"https://www\\.transfermarkt\\.com/[^\\"]+/profil/spieler/\\d+", html)
+    m = re.search(r'https://www\.transfermarkt\.com/[^"/]+/profil/spieler/\d+', html)
     return m.group(0) if m else None
 
 def _parse_transfermarkt(url: str) -> dict:
@@ -123,8 +123,9 @@ st.markdown("""
 ✅ הציון מבוסס על גיל, ליגה, דקות משחק, השפעה התקפית ועוד.
 
 ℹ️ הסבר דירוג:
-- **75+** = שחקן טופ אירופי בפוטנציאל
-- **60–74** = פוטנציאל גבוה / פרוספקט
+- **75+** = שחקן טופ אירופי בפוטנציאל  
+- **70–74** = פוטנציאל גבוה  
+- **60–69** = פרוספקט מבטיח  
 - **<60** = מקצוען עם תקרה מוגבלת
 """)
 
