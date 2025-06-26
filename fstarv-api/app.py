@@ -4,7 +4,7 @@ import requests, time, re, io
 from bs4 import BeautifulSoup
 import pandas as pd
 
-# ========== League Tier Map ==========
+# ================= League Tier Map =================
 SPI_CSV_URL = "https://projects.fivethirtyeight.com/soccer-api/club/spi_global_rankings.csv"
 @st.cache_data(ttl=86400)
 def _build_league_map():
@@ -31,7 +31,7 @@ TEAM_TO_LEAGUE = {
 }
 HEADERS = {"User-Agent":"Mozilla/5.0 (compatible; FstarV/1.0)"}
 
-# ========== Helpers ==========
+# ================= Helpers =================
 def league_factor(lg:str)->float: return TIER_FACTOR.get(LEAGUE_TIER_MAP.get(lg,4),0.6)
 def age_factor(bd:date)->float:
     age=(date.today()-bd).days//365
@@ -40,23 +40,33 @@ def age_factor(bd:date)->float:
 def google_scrape(query: str) -> str:
     try:
         html = requests.get(f"https://www.google.com/search?q={query}", headers=HEADERS, timeout=10).text
-        match = re.search(r'(\d{1,3}(\.\d{1,2})?) ?m', html, re.IGNORECASE)
-        return match.group(1) if match else "N/A"
+        m1 = re.search(r'(\d\.\d{2})\s?m', html)  # e.g. 1.79 m
+        m2 = re.search(r'(\d{1,2})′(\d{1,2})″', html)  # e.g. 5′10″
+        if m1:
+            return m1.group(1)
+        elif m2:
+            feet = int(m2.group(1))
+            inches = int(m2.group(2))
+            meters = round((feet * 0.3048) + (inches * 0.0254), 2)
+            return str(meters)
+        return "N/A"
     except:
         return "N/A"
 
-# ========== Wikipedia fallback ==========
+# ================= Wikipedia fallback =================
 def find_league_via_wikipedia(player: str) -> str:
     try:
         r = requests.get(f"https://en.wikipedia.org/api/rest_v1/page/summary/{player.replace(' ', '_')}", timeout=10).json()
         txt = r.get("extract", "")
-        m = re.search(r'plays.*for.*?([A-Z][a-z]+ [A-Z][a-z]+)', txt)
-        club = m.group(1).strip() if m else None
-        return TEAM_TO_LEAGUE.get(club, "Unknown") if club else "Unknown"
+        club_match = re.search(r'plays (as|in).*?for ([A-Z][a-zA-Z ]+)', txt)
+        if club_match:
+            club = club_match.group(2).strip()
+            return TEAM_TO_LEAGUE.get(club, "Unknown")
+        return "Unknown"
     except:
         return "Unknown"
 
-# ========== FBref scraping ==========
+# ================= FBref scraping =================
 @st.cache_data(ttl=86400)
 def _find_fbref_url(name:str)->str|None:
     q=name.strip().replace(" ","-")
@@ -93,43 +103,3 @@ def _parse_fbref(url:str)->dict:
             if comp and "league" in comp.text.lower():
                 mins = int(row.find("td",{"data-stat":"minutes"}).text.strip().replace(",","") or 0)
                 goals = int(row.find("td",{"data-stat":"goals"}).text.strip().replace(",","") or 0)
-                assists = int(row.find("td",{"data-stat":"assists"}).text.strip().replace(",","") or 0)
-                g_plus_a = goals + assists
-                break
-    return {"name":name,"birthdate":birthdate,"league":league,"minutes":mins or 2500,"g_plus_a":g_plus_a or 13}
-
-def fetch_player(name:str)->dict:
-    url=_find_fbref_url(name)
-    if not url: raise ValueError("Player not found on FBref")
-    time.sleep(1)
-    parsed = _parse_fbref(url)
-    if not parsed: raise ValueError("Could not parse player page correctly")
-    return parsed
-
-# ========== YSP‑75 ==========
-WEIGHTS={"minutes":.20,"performance":.25,"physical":.10,"technical":.15,"tactical":.10,"mental":.10,"health":.10,"traits":.10}
-def calculate_ysp75(p:dict)->dict:
-    L=league_factor(p["league"]); A=age_factor(p["birthdate"])
-    minutes_score=min(100,p["minutes"]/15); perf=min(100,p["g_plus_a"]*10)
-    raw = (minutes_score*WEIGHTS["minutes"]*L*A + perf*WEIGHTS["performance"]*L*A + 75*.55)
-    score = round(raw / 1.10, 1)
-    tier = "Top Europe" if score>=75 else "High Upside" if score>=70 else "Prospect" if score>=60 else "Professional"
-    return {"score":score, "tier":tier}
-
-# ========== UI ==========
-st.set_page_config(page_title="FstarVfootball", page_icon="⚽")
-st.title("FstarVfootball – חיזוי הצלחת שחקנים צעירים (YSP‑75)")
-st.markdown("הזן שם שחקן באנגלית (למשל **Lamine Yamal**)")
-
-name = st.text_input("שם שחקן:")
-if st.button("חשב מדד") and name:
-    with st.spinner("טוען נתונים..."):
-        try:
-            prof = fetch_player(name)
-            height = google_scrape(f"{name} height")
-            age = (date.today() - prof["birthdate"]).days // 365
-            res = calculate_ysp75(prof)
-            st.success(f"{prof['name']} – YSP‑75: {res['score']} ({res['tier']})")
-            st.caption(f"ליגה: {prof['league']} | גיל: {age} | גובה: {height} מ׳ | דקות:{prof['minutes']} | G+A:{prof['g_plus_a']}")
-        except Exception as e:
-            st.error(f"שגיאה: {e}")
