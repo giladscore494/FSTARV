@@ -1,16 +1,16 @@
-""" 
-FstarVfootball – Final Metric App (PRO version)
-===============================================
-• Uses Wikipedia + FOTMOB for player data.
-• Applies advanced metric: goals, rating, minutes, age, position, league multiplier.
-• Formula: (goals×2.5 + rating×10 + minutes/80) × position × age × league
-"""
-
 import requests
 import streamlit as st
-from typing import Any, Dict
+from typing import Dict
 
-# UEFA Coefficients (55)
+# משקלים
+WEIGHTS = {
+    "age": 0.25,
+    "league": 0.30,
+    "minutes": 0.20,
+    "impact": 0.25
+}
+
+# דירוג ליגות לפי אופ"א
 LEAGUE_COEFFICIENT = {
     "England": 94.839, "Italy": 84.374, "Spain": 78.703, "Germany": 74.545, "France": 67.748,
     "Netherlands": 59.950, "Portugal": 53.866, "Belgium": 52.050, "Turkey": 42.000,
@@ -19,99 +19,103 @@ LEAGUE_COEFFICIENT = {
     "Israel": 24.625, "Cyprus": 23.537, "Croatia": 21.125, "Serbia": 20.000,
     "Hungary": 19.750, "Slovakia": 19.750, "Romania": 19.500, "Russia": 18.299,
     "Slovenia": 18.093, "Ukraine": 17.600, "Azerbaijan": 17.125, "Bulgaria": 15.875,
-    "Moldova": 13.125, "Republic of Ireland": 13.093, "Iceland": 12.895, "Armenia": 10.875,
-    "Latvia": 10.875, "Bosnia and Herzegovina": 10.406, "Finland": 10.375, "Kosovo": 10.208,
-    "Kazakhstan": 10.125, "Faroe Islands": 8.000, "Liechtenstein": 7.500, "Malta": 7.000,
+    "Moldova": 13.125, "Ireland": 13.093, "Iceland": 12.895, "Armenia": 10.875,
+    "Latvia": 10.875, "Bosnia": 10.406, "Finland": 10.375, "Kosovo": 10.208,
+    "Kazakhstan": 10.125, "Faroe": 8.000, "Liechtenstein": 7.500, "Malta": 7.000,
     "Lithuania": 6.625, "Estonia": 6.582, "Luxembourg": 5.875, "Albania": 5.875,
-    "Montenegro": 5.583, "Northern Ireland": 5.500, "Wales": 5.291, "Georgia": 4.875,
-    "Andorra": 4.832, "Belarus": 4.500, "North Macedonia": 4.416, "Gibraltar": 3.791,
+    "Montenegro": 5.583, "N. Ireland": 5.500, "Wales": 5.291, "Georgia": 4.875,
+    "Andorra": 4.832, "Belarus": 4.500, "N. Macedonia": 4.416, "Gibraltar": 3.791,
     "San Marino": 1.998,
 }
+TIER_FACTOR = {0: 1.0, 1: 0.9, 2: 0.8, 3: 0.7, 4: 0.6}
 _BASE_COEFF = LEAGUE_COEFFICIENT["England"]
 
-def get_league_multiplier(league_or_country: str) -> float:
-    for country, coeff in LEAGUE_COEFFICIENT.items():
-        if country.lower() in league_or_country.lower():
-            return round(coeff / _BASE_COEFF, 3)
-    return 0.05
+def get_league_tier(league_country: str) -> int:
+    for name, coeff in LEAGUE_COEFFICIENT.items():
+        if name.lower() in league_country.lower():
+            ratio = coeff / _BASE_COEFF
+            if ratio >= 0.9: return 0
+            elif ratio >= 0.75: return 1
+            elif ratio >= 0.6: return 2
+            elif ratio >= 0.4: return 3
+            else: return 4
+    return 4
 
-def get_basic_player_data(name: str) -> Dict[str, Any]:
-    url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{name.replace(' ', '_')}"
+# שליפה מ־SOFIFA
+def get_sofifa_player_info(name: str) -> Dict[str, str]:
     try:
-        r = requests.get(url, timeout=5)
+        r = requests.get(f"https://sofifa.com/players?keyword={name}", headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
         r.raise_for_status()
-        data = r.json()
+        html = r.text
+        row = html.split('data-playerid="')[1].split('</tr>')[0]
+        age = int(row.split('Age</td><td>')[1].split('<')[0])
+        club = row.split('club?')[1].split('">')[1].split('<')[0]
+        league = row.split('league?')[1].split('">')[1].split('<')[0]
+        return {"age": age, "club": club, "league": league}
     except:
         return {}
-    return {
-        "name": data.get("title"),
-        "description": data.get("description"),
-        "extract": data.get("extract"),
-        "image": data.get("thumbnail", {}).get("source"),
-    }
 
-def get_fotmob_id(name: str) -> int | None:
+# שליפה מ־FOTMOB
+def get_fotmob_id(name: str):
     try:
         res = requests.get(f"https://www.fotmob.com/api/search?q={name}", timeout=5)
-        res.raise_for_status()
         return res.json().get("players", [{}])[0].get("id")
-    except:
-        return None
+    except: return None
 
-def get_fotmob_player_data(pid: int) -> Dict[str, Any]:
+def get_fotmob_player_data(pid: int) -> Dict:
     try:
         r = requests.get(f"https://www.fotmob.com/api/playerData?id={pid}", timeout=5)
-        r.raise_for_status()
         return r.json()
-    except:
-        return {}
+    except: return {}
 
-def compute_fstar_score(goals: int, rating: float, minutes: int, age: int, position: str, league: str) -> float:
-    age_factor = max(0.5, (27 - age) / 10)
-    position_weight = 1.0 if "attacker" in position.lower() else 0.85 if "mid" in position.lower() else 0.7
-    multiplier = get_league_multiplier(league)
-    base = (goals * 2.5 + rating * 10 + minutes / 80) * position_weight * age_factor
-    return round(base * multiplier, 2)
+# חישוב מדד
+def compute_ysp75_score(age: int, league_country: str, minutes: int, impact: int) -> float:
+    age_factor = 1 + 0.02 * (18 - age) if age <= 22 else 0.6
+    league_tier = get_league_tier(league_country)
+    league_factor = TIER_FACTOR.get(league_tier, 0.6)
+    minutes_factor = min(1.0, minutes / 2700)
+    impact_factor = min(1.0, impact / 20)
+    score = (
+        age_factor * WEIGHTS["age"] +
+        league_factor * WEIGHTS["league"] +
+        minutes_factor * WEIGHTS["minutes"] +
+        impact_factor * WEIGHTS["impact"]
+    ) * 100
+    return round(score, 1)
 
-# ==== Streamlit App ====
-st.set_page_config(page_title="FstarVfootball", page_icon="⚽")
-st.title("FstarVfootball – Final Metric (PRO)")
+def classify_score(score: float) -> str:
+    if score >= 75: return "Top-Europe Ready"
+    elif score >= 65: return "World-Class Potential"
+    elif score >= 55: return "Needs Improvement"
+    else: return "Below Threshold"
 
-player_name = st.text_input("Enter player name:", "Jude Bellingham")
+# ממשק Streamlit
+st.set_page_config(page_title="YSP-75", page_icon="🎯")
+st.title("🎯 YSP-75 – Combined Player Metric")
 
-if st.button("Analyze") and player_name.strip():
-    with st.spinner("Fetching data…"):
-        bio = get_basic_player_data(player_name)
-        pid = get_fotmob_id(player_name)
+name = st.text_input("Enter player name:", "Lamine Yamal")
+
+if st.button("Calculate YSP-75") and name.strip():
+    with st.spinner("Fetching data..."):
+        sofifa = get_sofifa_player_info(name)
+        pid = get_fotmob_id(name)
         stats = get_fotmob_player_data(pid) if pid else {}
 
-    if not bio:
-        st.error("Player not found on Wikipedia.")
+    if not sofifa:
+        st.error("Could not retrieve data from SOFIFA.")
         st.stop()
 
+    age = sofifa.get("age", 20)
+    league = sofifa.get("league", "Unknown")
     goals = stats.get("stats", {}).get("summary", {}).get("goals", 0)
-    rating = stats.get("stats", {}).get("summary", {}).get("rating", 6.5)
-    minutes = stats.get("stats", {}).get("summary", {}).get("minutesPlayed", 900)
-    age = stats.get("player", {}).get("age", 24)
-    position = stats.get("player", {}).get("position", "Midfielder")
-    league = stats.get("club", {}).get("leagueName", "Spain")
+    assists = stats.get("stats", {}).get("summary", {}).get("assists", 0)
+    minutes = stats.get("stats", {}).get("summary", {}).get("minutesPlayed", 800)
 
-    final = compute_fstar_score(goals, rating, minutes, age, position, league)
+    score = compute_ysp75_score(age, league, minutes, goals + assists)
+    label = classify_score(score)
 
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        if bio.get("image"):
-            st.image(bio["image"], width=160)
-        st.metric("Fstar Score", final)
-        st.caption(f"League Multiplier: {get_league_multiplier(league)}")
-    with col2:
-        st.subheader(bio.get("name"))
-        st.write(bio.get("description", ""))
-        st.write(bio.get("extract", ""))
-        st.markdown(f"**Goals:** {goals}  \\\n"
-                    f"**Rating:** {rating}  \\\n"
-                    f"**Minutes:** {minutes}  \\\n"
-                    f"**Age:** {age}  \\\n"
-                    f"**Position:** {position}  \\\n"
-                    f"**League:** {league}")
-    st.info("Formula: (goals×2.5 + rating×10 + minutes/80) × position × age × league")
+    st.metric("YSP-75 Score", f"{score}/100")
+    st.markdown(f"**Classification:** {label}")
+    st.markdown(f"**Age:** {age}  \\\n**League:** {league}  \\\n**Minutes:** {minutes}  \\\n**Goals + Assists:** {goals + assists}")
+    st.caption("Data: SOFIFA (age, league), FOTMOB (stats)")
+
