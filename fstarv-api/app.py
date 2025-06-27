@@ -38,7 +38,6 @@ WEIGHTS = {
     "positive": 0.10
 }
 
-# 🧠 פונקציה חכמה לזיהוי מדינת ליגה
 def country_from_league(league: str) -> str:
     league = league.lower()
     overrides = {
@@ -96,7 +95,7 @@ def classify(score: float) -> str:
 
 # Streamlit UI
 st.set_page_config(page_title="YSP-75 (2025)", page_icon="🎯")
-st.title("🎯 YSP-75 – Season 2024/25")
+st.title("🎯 YSP-75 – Combined Player Metric")
 
 name_query = st.text_input("Enter player name:")
 
