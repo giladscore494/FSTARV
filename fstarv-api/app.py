@@ -1,9 +1,6 @@
 import pandas as pd
 import streamlit as st
 
-# קובץ הנתונים
-DATA_PATH = "players_data-2024_2025.csv"
-
 # משקל לכל רכיב במדד
 WEIGHTS = {
     "age": 0.25,
@@ -57,9 +54,9 @@ def get_league_tier(league_country: str) -> int:
     return 4
 
 @st.cache_data
-def load_players():
+def load_players(file):
     cols = ["short_name", "age", "league_name", "minutes", "goals", "assists"]
-    df = pd.read_csv(DATA_PATH, usecols=lambda c: c in cols, low_memory=False)
+    df = pd.read_csv(file, usecols=lambda c: c in cols, low_memory=False)
     df = df.dropna(subset=["short_name", "age", "league_name"])
     df["impact"] = df[["goals", "assists"]].sum(axis=1)
     return df
@@ -94,26 +91,30 @@ def classify_score(score):
 st.set_page_config(page_title="YSP-75 (2025)", page_icon="🎯")
 st.title("🎯 YSP-75 – Young Success Potential")
 
-players_df = load_players()
-player_names = sorted(players_df["short_name"].unique())
-selected_player = st.selectbox("בחר שחקן", player_names)
+uploaded_file = st.file_uploader("העלה את קובץ השחקנים (CSV)", type="csv")
 
-player_data = players_df[players_df["short_name"] == selected_player].iloc[0]
-age = int(player_data["age"])
-league = player_data["league_name"]
-minutes = int(player_data["minutes"]) if not pd.isna(player_data["minutes"]) else 0
-impact = int(player_data["impact"]) if not pd.isna(player_data["impact"]) else 0
+if uploaded_file:
+    players_df = load_players(uploaded_file)
+    player_names = sorted(players_df["short_name"].unique())
+    selected_player = st.selectbox("בחר שחקן", player_names)
 
-score = compute_ysp75_score(age, league, minutes, impact)
-label = classify_score(score)
+    player_data = players_df[players_df["short_name"] == selected_player].iloc[0]
+    age = int(player_data["age"])
+    league = player_data["league_name"]
+    minutes = int(player_data["minutes"]) if not pd.isna(player_data["minutes"]) else 0
+    impact = int(player_data["impact"]) if not pd.isna(player_data["impact"]) else 0
 
-st.markdown(f"## 🧠 נתוני שחקן")
-st.markdown(f"- גיל: **{age}**")
-st.markdown(f"- ליגה: **{league}**")
-st.markdown(f"- דקות משחק: **{minutes}**")
-st.markdown(f"- תרומה התקפית (גולים + בישולים): **{impact}**")
+    score = compute_ysp75_score(age, league, minutes, impact)
+    label = classify_score(score)
 
-st.markdown("---")
-st.markdown(f"### 🏅 ציון YSP-75: **{score}/100**")
-st.markdown(f"### 📊 סיווג: **{label}**")
-st.caption("המדד מבוסס על גיל, רמת ליגה, דקות והשפעה התקפית.")
+    st.markdown(f"## 🧠 נתוני שחקן")
+    st.markdown(f"- גיל: **{age}**")
+    st.markdown(f"- ליגה: **{league}**")
+    st.markdown(f"- דקות משחק: **{minutes}**")
+    st.markdown(f"- תרומה התקפית: **{impact}**")
+
+    st.markdown("---")
+    st.markdown(f"### 🏅 ציון YSP-75: **{score}/100**")
+    st.markdown(f"### 📊 סיווג: **{label}**")
+else:
+    st.info("יש להעלות קובץ CSV עם הנתונים (עמודות: short_name, age, league_name, minutes, goals, assists)")
