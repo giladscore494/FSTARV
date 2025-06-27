@@ -1,16 +1,18 @@
 import streamlit as st
 import pandas as pd
-import os
 
-# קריאת הנתונים מתוך הקובץ (באותה תיקייה של הקוד)
-@st.cache_data
-def load_players():
-    DATA_PATH = os.path.join(os.path.dirname(__file__), "players_data-2024_2025.csv")
-    cols = ["short_name", "age", "league_name", "club_name", "height_cm"]
-    df = pd.read_csv(DATA_PATH, usecols=lambda c: c in cols, low_memory=False)
-    return df
+# הגדרות משקלות לרכיבי המדד
+WEIGHTS = {
+    "age": 0.20,
+    "league": 0.20,
+    "minutes": 0.15,
+    "actual_impact": 0.15,
+    "expected_impact": 0.15,
+    "attack_build": 0.075,
+    "defense": 0.075
+}
 
-# דירוג לפי מדד אופ"א
+# דירוג טיר לליגות אופ"א לפי מקדם
 LEAGUE_COEFFICIENT = {
     "England": 94.839, "Italy": 84.374, "Spain": 78.703, "Germany": 74.545, "France": 67.748,
     "Netherlands": 59.950, "Portugal": 53.866, "Belgium": 52.050, "Turkey": 42.000,
@@ -27,23 +29,7 @@ LEAGUE_COEFFICIENT = {
     "Andorra": 4.832, "Belarus": 4.500, "North Macedonia": 4.416, "Gibraltar": 3.791,
     "San Marino": 1.998,
 }
-
 _BASE_COEFF = LEAGUE_COEFFICIENT["England"]
-
-TIER_FACTOR = {
-    0: 1.0,
-    1: 0.9,
-    2: 0.8,
-    3: 0.7,
-    4: 0.6
-}
-
-WEIGHTS = {
-    "age": 0.25,
-    "league": 0.30,
-    "minutes": 0.20,
-    "impact": 0.25
-}
 
 def get_league_tier(league_name: str) -> int:
     for country, coeff in LEAGUE_COEFFICIENT.items():
@@ -61,18 +47,56 @@ def get_league_tier(league_name: str) -> int:
                 return 4
     return 4
 
-def compute_ysp75_score(age: int, league: str, minutes_played: int = 2000, goals_plus_assists: int = 10) -> float:
-    age_factor = 1 + 0.02 * (18 - age) if age <= 22 else 0.6
-    league_tier = get_league_tier(league)
+TIER_FACTOR = {
+    0: 1.0,
+    1: 0.9,
+    2: 0.8,
+    3: 0.7,
+    4: 0.6
+}
+
+@st.cache_data
+def load_players():
+    cols = [
+        "Player", "Age", "Comp", "Min", "Gls", "Ast",
+        "xG", "xAG", "GCA", "SCA", "Tkl", "Int"
+    ]
+    df = pd.read_csv("players_data-2024_2025.csv", usecols=cols, low_memory=False)
+    df["Player"] = df["Player"].astype(str).str.strip()
+    df["Comp"] = df["Comp"].astype(str).str.strip()
+    df = df.dropna(subset=["Player", "Age", "Comp", "Min"])
+
+    df["total_impact"] = df["Gls"] + df["Ast"]
+    df["expected_impact"] = df["xG"] + df["xAG"]
+    df["attack_build"] = df["GCA"] + df["SCA"]
+    df["defense_total"] = df["Tkl"] + df["Int"]
+    return df
+
+def compute_ysp75_score(row) -> float:
+    age = row["Age"]
+    minutes = row["Min"]
+    impact = row["total_impact"]
+    expected = row["expected_impact"]
+    attack = row["attack_build"]
+    defense = row["defense_total"]
+    league_tier = get_league_tier(row["Comp"])
     league_factor = TIER_FACTOR.get(league_tier, 0.6)
-    minutes_factor = min(1.0, minutes_played / 2700)
-    impact_factor = min(1.0, goals_plus_assists / 20)
+
+    age_factor = 1 + 0.02 * (18 - age) if age <= 22 else 0.6
+    minutes_factor = min(1.0, minutes / 2700)
+    actual_impact = min(1.0, impact / 20)
+    expected_impact = min(1.0, expected / 20)
+    attack_factor = min(1.0, attack / 40)
+    defense_factor = min(1.0, defense / 40)
 
     score = (
         age_factor * WEIGHTS["age"] +
         league_factor * WEIGHTS["league"] +
         minutes_factor * WEIGHTS["minutes"] +
-        impact_factor * WEIGHTS["impact"]
+        actual_impact * WEIGHTS["actual_impact"] +
+        expected_impact * WEIGHTS["expected_impact"] +
+        attack_factor * WEIGHTS["attack_build"] +
+        defense_factor * WEIGHTS["defense"]
     ) * 100
     return round(score, 1)
 
@@ -87,33 +111,23 @@ def classify_score(score: float) -> str:
         return "Below Threshold"
 
 # UI
-st.set_page_config(page_title="FstarV – YSP-75", page_icon="🎯")
+st.set_page_config(page_title="YSP-75 Metric", page_icon="🎯")
 st.title("🎯 YSP-75 – Combined Player Metric")
+player_name = st.text_input("Enter player name:")
 
 players_df = load_players()
 
-player_name = st.text_input("Enter player name:")
-player = players_df[players_df["short_name"].str.lower() == player_name.lower()]
-
-if not player.empty:
-    row = player.iloc[0]
-    st.markdown(f"**Player:** {row['short_name']}")
-    st.markdown(f"**Age:** {row['age']}")
-    st.markdown(f"**Height (cm):** {row['height_cm']}")
-    st.markdown(f"**Club:** {row['club_name']}")
-    st.markdown(f"**League:** {row['league_name']}")
-
-    # simulate some values
-    minutes = st.slider("Minutes Played", 0, 3500, 2000, step=100)
-    goals = st.slider("Goals", 0, 30, 6)
-    assists = st.slider("Assists", 0, 30, 4)
-    total_impact = goals + assists
-
-    if st.button("Calculate YSP-75 Score"):
-        score = compute_ysp75_score(row["age"], row["league_name"], minutes, total_impact)
+if player_name:
+    player = players_df[players_df["Player"].str.lower() == player_name.lower()]
+    if not player.empty:
+        row = player.iloc[0]
+        score = compute_ysp75_score(row)
         label = classify_score(score)
+
         st.success(f"YSP-75 Score: {score}/100")
-        st.markdown(f"### 📊 Classification: **{label}**")
-else:
-    if player_name:
-        st.warning("Player not found. Please check the spelling.")
+        st.markdown(f"### Classification: **{label}**")
+        st.markdown("---")
+        st.subheader("📊 Player Data")
+        st.write(row[["Age", "Comp", "Min", "Gls", "Ast", "xG", "xAG", "GCA", "SCA", "Tkl", "Int"]])
+    else:
+        st.warning("Player not found.")
